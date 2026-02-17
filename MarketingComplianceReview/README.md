@@ -64,5 +64,3 @@ The workflow returns one of two JSON structures:
 - SEC Rule 206(4)-1 — Investment Adviser Marketing
 - Securities Act Rule 506 / Regulation D
 - SEC Rule 17a-4 / IA Act Rule 204-2 — Recordkeeping
-
-<img width="779" height="551" alt="image" src="https://github.com/user-attachments/assets/a1c0a88a-9e5d-4ab9-bd6f-83017e962692" />
