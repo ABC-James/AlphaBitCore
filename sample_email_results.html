@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compliance Review Report</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; font-size: 14px; }
+
+  .page { max-width: 960px; margin: 32px auto; padding: 0 20px 60px; }
+
+  /* Header */
+  .report-header { background: #1a1a2e; color: white; border-radius: 10px; padding: 32px 36px; margin-bottom: 24px; }
+  .report-header h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .report-header .subtitle { font-size: 13px; color: #a0aec0; text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Status Banner */
+  .status-banner { background: #c53030; color: white; border-radius: 8px; padding: 18px 24px; margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
+  .status-banner .badge { background: rgba(255,255,255,0.2); border: 1.5px solid rgba(255,255,255,0.5); border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 700; letter-spacing: 1px; white-space: nowrap; }
+  .status-banner .text h2 { font-size: 17px; font-weight: 700; }
+  .status-banner .text p { font-size: 13px; margin-top: 4px; opacity: 0.9; line-height: 1.5; }
+
+  /* Grid */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+
+  /* Cards */
+  .card { background: white; border-radius: 8px; padding: 20px 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+  .card h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #718096; margin-bottom: 14px; border-bottom: 1px solid #edf2f7; padding-bottom: 8px; }
+
+  /* Classification rows */
+  .kv-row { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; border-bottom: 1px solid #f7fafc; font-size: 13px; }
+  .kv-row:last-child { border-bottom: none; }
+  .kv-label { color: #718096; }
+  .kv-value { font-weight: 600; text-align: right; max-width: 55%; }
+
+  /* Issue counts */
+  .count-grid { display: flex; gap: 12px; }
+  .count-box { flex: 1; text-align: center; border-radius: 8px; padding: 14px 8px; }
+  .count-box .num { font-size: 28px; font-weight: 800; line-height: 1; }
+  .count-box .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .count-high { background: #fff5f5; color: #c53030; }
+  .count-medium { background: #fffaf0; color: #c05621; }
+  .count-low { background: #f0fff4; color: #276749; }
+  .count-total { background: #ebf4ff; color: #2b6cb0; }
+
+  /* Issue sections */
+  .section-title { font-size: 15px; font-weight: 700; margin: 28px 0 12px; display: flex; align-items: center; gap: 10px; }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+
+  .severity-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; padding: 2px 10px; border-radius: 20px; text-transform: uppercase; }
+  .tag-high { background: #fed7d7; color: #9b2c2c; }
+  .tag-medium { background: #feebc8; color: #9c4221; }
+  .tag-low { background: #c6f6d5; color: #22543d; }
+
+  .issue-card { background: white; border-radius: 8px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border-left: 4px solid transparent; }
+  .issue-card.high { border-left-color: #e53e3e; }
+  .issue-card.medium { border-left-color: #ed8936; }
+  .issue-card.low { border-left-color: #48bb78; }
+
+  .issue-header { padding: 14px 18px 10px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .issue-quote { font-size: 14px; font-weight: 600; color: #1a202c; flex: 1; }
+  .issue-rule { font-size: 11px; color: #718096; white-space: nowrap; font-family: monospace; background: #f7fafc; padding: 2px 8px; border-radius: 4px; }
+
+  .issue-body { padding: 0 18px 14px; }
+  .issue-explanation { font-size: 13px; color: #4a5568; line-height: 1.6; margin-bottom: 10px; }
+  .issue-fix { background: #f0fff4; border: 1px solid #c6f6d5; border-radius: 6px; padding: 10px 14px; }
+  .issue-fix .fix-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #276749; margin-bottom: 4px; }
+  .issue-fix .fix-text { font-size: 13px; color: #22543d; line-height: 1.5; }
+
+  /* Required changes table */
+  .changes-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .changes-table th { background: #f7fafc; text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #718096; border-bottom: 2px solid #e2e8f0; }
+  .changes-table td { padding: 11px 14px; border-bottom: 1px solid #f0f4f8; vertical-align: top; line-height: 1.5; }
+  .changes-table tr:last-child td { border-bottom: none; }
+  .changes-table tr:hover td { background: #fafbfd; }
+  .rule-chip { font-family: monospace; font-size: 11px; background: #ebf4ff; color: #2b6cb0; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+
+  /* Disclosures */
+  .disclosure-box { background: #fffef0; border: 1.5px solid #f6e05e; border-radius: 8px; padding: 18px 22px; font-size: 13px; line-height: 1.7; color: #4a4a00; white-space: pre-wrap; }
+
+  /* Recordkeeping */
+  .rec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .rec-item { background: #f7fafc; border-radius: 6px; padding: 12px 14px; }
+  .rec-item .r-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .rec-item .r-value { font-size: 14px; font-weight: 700; color: #2d3748; }
+
+  /* Footer */
+  .disclaimer { background: white; border-radius: 8px; padding: 16px 20px; font-size: 12px; color: #718096; line-height: 1.6; border: 1px solid #e2e8f0; margin-top: 28px; }
+  .disclaimer strong { color: #4a5568; }
+
+  /* Tags */
+  .tag { display: inline-block; background: #edf2f7; color: #4a5568; border-radius: 4px; font-size: 11px; padding: 2px 8px; margin: 2px 2px 2px 0; font-weight: 600; }
+  .tag.complexity-high { background: #fff5f5; color: #c53030; }
+
+  @media (max-width: 640px) {
+    .grid-2, .grid-3, .rec-grid { grid-template-columns: 1fr; }
+    .count-grid { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="report-header">
+    <div class="subtitle">AI-Assisted Compliance Review</div>
+    <h1>Compliance Review Report</h1>
+  </div>
+
+  <!-- Status Banner -->
+  <div class="status-banner">
+    <div class="badge">⚠ CRITICAL</div>
+    <div class="text">
+      <h2>ESCALATION REQUIRED</h2>
+      <p>Prohibited statements about investment safety, missing accredited investor disclosure for VERY HIGH assets marketed to retail, unregistered offering without proper Reg D disclosures, performance presented with zero disclaimers and no risk context.</p>
+    </div>
+  </div>
+
+  <!-- Classification + Issue Counts -->
+  <div class="grid-2">
+    <div class="card">
+      <h3>Classification</h3>
+      <div class="kv-row"><span class="kv-label">Complexity</span><span class="kv-value">LIGHT</span></div>
+      <div class="kv-row"><span class="kv-label">Asset Classes</span><span class="kv-value">Private Credit Fund</span></div>
+      <div class="kv-row"><span class="kv-label">Asset Complexity</span><span class="kv-value"><span class="severity-tag tag-high">VERY HIGH</span></span></div>
+      <div class="kv-row"><span class="kv-label">Firm Type</span><span class="kv-value">Dual Registrant</span></div>
+      <div class="kv-row"><span class="kv-label">Audience</span><span class="kv-value">Retail</span></div>
+      <div class="kv-row"><span class="kv-label">Channel</span><span class="kv-value">Email</span></div>
+      <div class="kv-row"><span class="kv-label">Word Count</span><span class="kv-value">124</span></div>
+    </div>
+    <div class="card">
+      <h3>Issue Summary</h3>
+      <div class="count-grid">
+        <div class="count-box count-high"><div class="num">5</div><div class="lbl">High</div></div>
+        <div class="count-box count-medium"><div class="num">2</div><div class="lbl">Medium</div></div>
+        <div class="count-box count-low"><div class="num">1</div><div class="lbl">Low</div></div>
+        <div class="count-box count-total"><div class="num">8</div><div class="lbl">Total</div></div>
+      </div>
+      <div style="margin-top: 16px;">
+        <div class="kv-row"><span class="kv-label">Processing Version</span><span class="kv-value">V4_BALANCED</span></div>
+        <div class="kv-row"><span class="kv-label">Analyzers Executed</span><span class="kv-value">6 of 8</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Analyzers Run -->
+  <div class="card" style="margin-bottom: 16px;">
+    <h3>Analyzers Run</h3>
+    <div style="padding-top: 4px;">
+      <span class="tag">analyze_prohibited_statements</span>
+      <span class="tag">analyze_performance_claims</span>
+      <span class="tag">analyze_risk_disclosure</span>
+      <span class="tag">analyze_communications</span>
+      <span class="tag">analyze_recordkeeping</span>
+      <span class="tag">analyze_private_placement</span>
+    </div>
+  </div>
+
+  <!-- HIGH Issues -->
+  <div class="section-title"><span class="severity-tag tag-high">High</span> Issues</div>
+
+  <div class="issue-card high">
+    <div class="issue-header">
+      <div class="issue-quote">"it's essentially as safe as your bank deposits"</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(B)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Comparing a private credit fund to FDIC-insured bank deposits grossly misrepresents risk. Private credit investments carry credit risk, liquidity risk, and lack federal insurance protection. This is false safety representation to retail investors.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">Remove safety comparison entirely. If discussing risk profile, state: "This fund invests in senior secured debt, which ranks higher in the capital structure. However, all investments carry risk including potential loss of principal. See the offering documents for complete risk disclosures."</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue-card high">
+    <div class="issue-header">
+      <div class="issue-quote">"hasn't had a losing quarter in 5 years"</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(D)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Cherry-picked performance period presented without required disclosures (inception date, methodology, whether returns are net of fees, comparative index, disclaimer that past performance doesn't guarantee future results). Implies safety and consistency without proper context for a private fund.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">If including performance: "Past performance data available in the offering documents. Past performance does not guarantee future results. All investments involve risk of loss."</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue-card high">
+    <div class="issue-header">
+      <div class="issue-quote">"No formal disclosures are needed for this teaser since it's just an initial interest check"</div>
+      <div class="issue-rule">FINRA Rule 2210 &amp; SEC Regulation D</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">False statement about regulatory requirements. Communications soliciting investment interest in private placements to retail investors require compliance with advertising rules and may trigger filing requirements. This statement could mislead RRs or clients about compliance obligations.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">Remove this statement entirely. Ensure all communications comply with applicable securities laws and include required disclosures.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue-card high">
+    <div class="issue-header">
+      <div class="issue-quote">"much higher upside"</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(B)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Promises enhanced returns without acknowledging corresponding risks. For a private credit fund, higher yield comes with higher risk (credit risk, liquidity risk, lack of transparency). Statement is unbalanced and misleading.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">"The fund targets higher yields, which come with additional risks including credit risk, liquidity constraints, and potential loss of principal."</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue-card high">
+    <div class="issue-header">
+      <div class="issue-quote">No risk disclosure for VERY_HIGH complexity private credit fund with multiple misleading safety claims</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(A) and (E)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Private credit funds require prominent disclosure of risk of total loss, illiquidity, lack of liquidity, and unsuitability for many investors. Content misleadingly compares to 'safe as bank deposits' without any counterbalancing risk warnings.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">IMPORTANT RISK DISCLOSURES: Investment in private credit funds involves substantial risk, including the risk of total loss of principal. This investment is illiquid with significant lock-up periods and no ability to redeem on demand. Private credit funds are not bank deposits, are not FDIC insured, and involve materially higher risks including credit default risk, lack of transparency, and complex fee structures that may significantly reduce returns. This investment is only suitable for accredited investors who can afford to lose their entire investment. Past performance does not guarantee future results.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEDIUM Issues -->
+  <div class="section-title"><span class="severity-tag tag-medium">Medium</span> Issues</div>
+
+  <div class="issue-card medium">
+    <div class="issue-header">
+      <div class="issue-quote">"target a 9% annual yield"</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(C)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Specific yield projection without required disclaimers that targets are not guaranteed, may not be achieved, and do not represent actual or promised returns. Particularly problematic for retail audience with illiquid private fund.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">"The fund's target yield is 9% annually. Targets are not guarantees and actual returns may be higher or lower. There is no assurance the fund will achieve its investment objective."</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="issue-card medium">
+    <div class="issue-header">
+      <div class="issue-quote">High-pressure urgency tactics: "$500k total capacity", "grab a spot before it fills", "Monday's deadline", "Reply 'YES'"</div>
+      <div class="issue-rule">FINRA Rule 2210(d)(1)(B)</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Creates artificial scarcity and urgency to pressure retail investors into illiquid private placement without adequate time for due diligence. The casual 'Reply YES' format trivializes a complex investment decision requiring extensive disclosure review.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">"Limited availability. Interested investors should review the Private Placement Memorandum carefully and consult with their tax and legal advisors before investing. Please contact us to request offering documents."</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOW Issues -->
+  <div class="section-title"><span class="severity-tag tag-low">Low</span> Issues</div>
+
+  <div class="issue-card low">
+    <div class="issue-header">
+      <div class="issue-quote">"I've secured a small allocation... for our best clients"</div>
+      <div class="issue-rule">FINRA Rule 2210</div>
+    </div>
+    <div class="issue-body">
+      <div class="issue-explanation">Creates impression of exclusive access/favoritism. While not prohibited, could be clarified to avoid implying preferential treatment in allocation of investment opportunities.</div>
+      <div class="issue-fix">
+        <div class="fix-label">Suggested Fix</div>
+        <div class="fix-text">"We have access to an allocation in the Alpha-Prime Private Credit Fund that may be suitable for qualified investors."</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Required Changes -->
+  <div class="section-title">Required Changes</div>
+  <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
+    <table class="changes-table">
+      <thead>
+        <tr>
+          <th style="width: 40%">Edit Required</th>
+          <th style="width: 40%">Rationale</th>
+          <th style="width: 20%">Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Remove the statement "it's essentially as safe as your bank deposits".</td>
+          <td>Misleading safety comparison to FDIC-insured deposits.</td>
+          <td><span class="rule-chip">FINRA 2210(d)(1)(B)</span></td>
+        </tr>
+        <tr>
+          <td>Remove the performance claim "hasn't had a losing quarter in 5 years".</td>
+          <td>Performance claims require proper context and disclaimers.</td>
+          <td><span class="rule-chip">FINRA 2210(d)(1)(D)</span></td>
+        </tr>
+        <tr>
+          <td>Remove the statement "No formal disclosures are needed for this teaser".</td>
+          <td>False statement about regulatory requirements.</td>
+          <td><span class="rule-chip">FINRA 2210</span></td>
+        </tr>
+        <tr>
+          <td>Replace "much higher upside" with "The fund targets higher yields, which come with additional risks including credit risk, liquidity constraints, and potential loss of principal."</td>
+          <td>Promises enhanced returns without acknowledging corresponding risks.</td>
+          <td><span class="rule-chip">FINRA 2210(d)(1)(B)</span></td>
+        </tr>
+        <tr>
+          <td>Include risk disclosures for private credit funds.</td>
+          <td>Omission of material risks for illiquid alternative investment.</td>
+          <td><span class="rule-chip">FINRA 2210(d)(1)(A)</span></td>
+        </tr>
+        <tr>
+          <td>Remove urgency language and replace with "Investors should carefully review all offering materials and consult with their financial, tax, and legal advisors before making any investment decision."</td>
+          <td>Artificial scarcity and urgency tactics inappropriate for complex investment.</td>
+          <td><span class="rule-chip">FINRA 2210(d)(1)(B)</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Optional Improvements -->
+  <div class="section-title">Optional Improvements</div>
+  <div class="card" style="margin-bottom: 16px;">
+    <div style="font-size: 13px; color: #4a5568; line-height: 1.6; margin-bottom: 8px;">
+      <strong>Suggested language:</strong> "We have access to an allocation in the Alpha-Prime Private Credit Fund that may be suitable for qualified investors."
+    </div>
+    <div style="font-size: 13px; color: #718096;">Clarifying language to avoid implying preferential treatment in allocation of investment opportunities.</div>
+  </div>
+
+  <!-- Required Disclosures -->
+  <div class="section-title">Required Disclosures</div>
+  <div class="disclosure-box">REQUIRED DISCLOSURES:
+
+Past performance is not indicative of future results. All investments involve risk, including possible loss of principal. Returns shown are net of management fees of 1.5% annually.
+
+This investment is available only to accredited investors as defined under Regulation D. Investors may lose their entire investment. The securities are illiquid with no public market, and transfer is restricted. Initial 1-year lock-up with quarterly redemptions thereafter on 90-day notice.
+
+These securities have not been registered with the Securities and Exchange Commission and are being offered pursuant to an exemption from registration under Regulation D.
+
+There is no public market for these securities and none is expected to develop. These securities are illiquid and investors should not expect to be able to liquidate their investment.</div>
+
+  <!-- Substantiation Needed -->
+  <div class="section-title">Substantiation Needed</div>
+  <div class="card" style="margin-bottom: 16px;">
+    <p style="font-size: 13px; color: #4a5568;">The following claim requires documented substantiation before use:</p>
+    <div style="margin-top: 10px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 6px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: #c53030;">"hasn't had a losing quarter in 5 years"</div>
+  </div>
+
+  <!-- Recordkeeping -->
+  <div class="section-title">Recordkeeping Requirements</div>
+  <div class="card" style="margin-bottom: 16px;">
+    <div class="rec-grid">
+      <div class="rec-item">
+        <div class="r-label">Communication Type</div>
+        <div class="r-value">Correspondence</div>
+      </div>
+      <div class="rec-item">
+        <div class="r-label">Principal Approval Required</div>
+        <div class="r-value" style="color: #276749;">No</div>
+      </div>
+      <div class="rec-item">
+        <div class="r-label">Pre-Use Filing Required</div>
+        <div class="r-value" style="color: #276749;">No</div>
+      </div>
+      <div class="rec-item">
+        <div class="r-label">Retention Period</div>
+        <div class="r-value">3 Years</div>
+      </div>
+      <div class="rec-item">
+        <div class="r-label">Filing Category</div>
+        <div class="r-value" style="color: #a0aec0;">N/A</div>
+      </div>
+      <div class="rec-item">
+        <div class="r-label">Special Requirements</div>
+        <div class="r-value" style="color: #a0aec0;">None</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="disclaimer">
+    <strong>Disclaimer:</strong> This AI-assisted compliance review provides guidance based on FINRA and SEC regulations. It does not constitute legal advice. Final approval should be made by a qualified compliance professional. Material changes require re-review.
+  </div>
+
+</div>
+</body>
+</html>
