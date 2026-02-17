@@ -1,0 +1,374 @@
+{
+  "nodes": [
+    {
+      "id": "classify_request_type",
+      "type": "MODEL",
+      "config": {
+        "prompt": "You are a compliance request classifier with STRICT rejection criteria.\n\nSCOPE: ONLY marketing/advertising content for financial services compliance review\n\nNON-GOALS (REJECT immediately):\n- General questions about compliance rules\n- Requests for compliance advice/guidance  \n- Questions about how to write compliant content\n- Theoretical compliance scenarios\n\nINPUTS: {{message}}\n\nOUTPUT SCHEMA (Return ONLY valid JSON):\n{\n  \"is_compliance_request\": true|false,\n  \"rejection_reason\": \"specific reason\"|null,\n  \"firm_type\": \"Broker-Dealer|RIA|Dual Registrant|Unknown\",\n  \"audience\": \"Retail|Institutional|Internal\",\n  \"channel\": \"Social|Email|Website|Pitchbook|Factsheet|Presentation|Other\",\n  \"content_extracted\": \"actual marketing text\",\n  \"content_length_chars\": number,\n  \"confidence\": 0.0-1.0\n}\n\nDECISION RUBRIC:\n- Contains marketing/advertising content for review → is_compliance_request = true\n- Question about rules/regulations → is_compliance_request = false\n- \"How do I write...\" → is_compliance_request = false\n- \"Is it okay to say...\" without actual content → is_compliance_request = false\n\nEDGE CASES:\n• Empty message → REJECT: \"No content provided\"\n• \"Can I say guaranteed returns?\" → REJECT: \"Question about rules, not content review\"\n• \"Review this: [content]\" → ACCEPT if [content] exists\n• Implied review (\"Is this okay? [content]\") → ACCEPT, extract content\n\nSAFE-FAIL:\n- If ANY marketing text present → ACCEPT (err on side of reviewing)\n- If ONLY questions with no content → REJECT\n- confidence < 0.7 if borderline",
+        "__nodeVersion": "1.0.0"
+      },
+      "position": {
+        "x": 100,
+        "y": 725
+      }
+    },
+    {
+      "id": "fast_fail_handler",
+      "type": "MODEL",
+      "config": {
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == false.\n\nGenerate polite rejection explaining why this isn't a compliance review request.\n\nTEMPLATE:\nI appreciate your interest in compliance review, but [explain why this doesn't qualify].\n\nThis service is designed to review actual marketing/advertising content for FINRA and SEC compliance.\n\nIf you have specific marketing materials you'd like reviewed (emails, social posts, factsheets, presentations), please share the content and I'll provide a detailed compliance analysis.",
+        "__nodeVersion": "1.0.0"
+      },
+      "position": {
+        "x": 450,
+        "y": 725
+      }
+    },
+    {
+      "id": "classify_content_complexity",
+      "type": "MODEL",
+      "config": {
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true.\n\nYou are a content complexity analyzer.\n\nOBJECTIVE: Classify content to optimize analyzer execution\n\nINPUTS:\n- Content: {{classify_request_type.content_extracted}}\n- Channel: {{classify_request_type.channel}}\n- Length: {{classify_request_type.content_length_chars}} chars\n\nOUTPUT SCHEMA (Return ONLY valid JSON):\n{\n  \"complexity\": \"MINIMAL|LIGHT|MODERATE|COMPREHENSIVE\",\n  \"word_count\": number,\n  \"sentence_count\": number,\n  \"has_performance_claims\": true|false,\n  \"has_numerical_claims\": true|false,\n  \"has_testimonials\": true|false,\n  \"has_endorsements\": true|false,\n  \"has_risk_language\": true|false,\n  \"has_rankings\": true|false,\n  \"has_comparisons\": true|false,\n  \"requires_performance_analysis\": true|false,\n  \"requires_testimonial_analysis\": true|false,\n  \"requires_risk_analysis\": true|false,\n  \"requires_recordkeeping_analysis\": true|false,\n  \"reasoning\": \"brief explanation\"\n}\n\nCOMPLEXITY LEVELS:\n- MINIMAL (1-50 words, social, no claims)\n- LIGHT (51-150 words, basic claims)\n- MODERATE (151-400 words, multiple claims)\n- COMPREHENSIVE (400+ words, complex)\n\nCLAIM DETECTION:\n**has_performance_claims:** Specific historical or projected returns with numbers, explicit period returns (\"returned 12%\"), specific outperformance claims with quantified data. Do NOT set true for: \"strong performance\", \"solid returns\", \"competitive performance\", \"attractive risk-adjusted returns\" — these are marketing puffery, not performance claims requiring compliance analysis.\n**has_numerical_claims:** Specific percentages, dollar amounts, or multiples tied directly to investment outcomes. Do NOT set true for general firm statistics (\"30 years in business\", \"$2B AUM\", \"50 investment professionals\") unless they constitute an investment performance claim.\n**has_testimonials:** Client quotes with attribution to a specific named or identified person\n**has_rankings:** Explicit quantified rankings like \"#1\", \"top quartile\", \"top 10%\". Do NOT set true for unquantified superlatives like \"industry-leading\", \"market-leading\", \"best-in-class\" — these are puffery.\n**has_comparisons:** Explicit \"vs\", \"compared to\" with specific benchmark or competitor data including actual numbers\n\nREQUIRES FLAGS:\n- requires_performance_analysis = true when has_performance_claims == true OR has_numerical_claims == true OR complexity >= MODERATE\n- requires_testimonial_analysis = true when has_testimonials == true OR complexity == COMPREHENSIVE\n- requires_risk_analysis = true when word_count > 150 OR complexity >= MODERATE\n- requires_recordkeeping_analysis = true when word_count > 200 OR complexity >= MODERATE\n\nEDGE CASES:\n• Short with numbers (\"15% return!\") → LIGHT but requires_performance_analysis = true\n• Social post with quote → MINIMAL but requires_testimonial_analysis = true\n• \"Strong performance\" without numbers → Do NOT flag as performance claim; this is puffery\n• \"Strong performance in 2024, returning 18%\" → has_performance_claims = true (specific number present)\n• \"$2B in AUM\" → has_numerical_claims = false (firm statistic, not investment outcome)\n• \"Generated $500M in returns for clients\" → has_numerical_claims = true (investment outcome claim)\n\nSAFE-FAIL:\n- Uncertain about a claim → Ask: does it contain a specific verifiable number tied to investment outcomes? If yes, flag it. If it is aspirational or descriptive language without a specific verifiable number, do not flag it.\n- Borderline complexity → Choose higher level",
+        "__nodeVersion": "1.0.0"
+      },
+      "position": {
+        "x": 450,
+        "y": 575
+      }
+    },
+    {
+      "id": "classify_asset_class",
+      "type": "MODEL",
+      "config": {
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true.\n\nYou are an asset class complexity classifier.\n\nOBJECTIVE: Identify asset classes and trigger specialized analyzers\n\nINPUTS:\n- Content: {{classify_request_type.content_extracted}}\n- Audience: {{classify_request_type.audience}}\n\nOUTPUT SCHEMA (Return ONLY valid JSON):\n{\n  \"asset_classes_mentioned\": [\"list\"],\n  \"highest_complexity\": \"MINIMAL|LOW|MODERATE|HIGH|VERY_HIGH\",\n  \"requires_illiquidity_disclosure\": true|false,\n  \"requires_accredited_investor_language\": true|false,\n  \"requires_fee_disclosure\": true|false,\n  \"requires_risk_of_loss_disclosure\": true|false,\n  \"requires_lack_of_liquidity_warning\": true|false,\n  \"requires_suitability_language\": true|false,\n  \"run_hedge_fund_analyzer\": true|false,\n  \"run_private_placement_analyzer\": true|false,\n  \"reasoning\": \"brief explanation\"\n}\n\nCOMPLEXITY LADDER:\n- MINIMAL: Cash, Money Market\n- LOW: ETFs, Index Funds\n- MODERATE: Mutual Funds, Stocks, Bonds\n- HIGH: Options, Derivatives, REITs, Alternatives\n- VERY HIGH: Hedge Funds, Private Equity, Private Placements\n\nDETECTION PATTERNS:\n**Hedge Fund:** \"hedge fund\", \"long/short\", \"absolute return\", \"2 and 20\"\n**Private Placement:** \"Reg D\", \"506(b)\", \"506(c)\", \"unregistered offering\", \"PPM\"\n**Options/Derivatives:** \"options\", \"futures\", \"swaps\", \"derivatives\"\n**Leveraged:** \"2x\", \"3x\", \"leveraged ETF\", \"inverse ETF\"\n\nAUDIENCE RULES:\n- Retail + VERY HIGH → requires_accredited_investor_language = true\n- Retail + HIGH → requires_suitability_language = true\n\nTRIGGERS:\n- run_hedge_fund_analyzer = true when: explicit \"hedge fund\" OR alternative fund + performance fees\n- run_private_placement_analyzer = true when: \"Reg D\" OR \"private placement\" OR \"unregistered offering\"\n\nEDGE CASES:\n• \"Alternative investments\" vague → HIGH not VERY HIGH\n• Multiple assets → Use HIGHEST complexity\n• \"Private real estate fund\" → VERY HIGH (private placement)\n• \"For accredited investors only\" → VERY HIGH\n\nSAFE-FAIL:\n- Ambiguous asset → Choose higher complexity\n- Uncertain about analyzer trigger → Run it",
+        "__nodeVersion": "1.0.0"
+      },
+      "position": {
+        "x": 450,
+        "y": 875
+      }
+    },
+    {
+      "id": "analyze_prohibited_statements",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true.\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a prohibited statements analyzer for financial services compliance.\\n\\nOBJECTIVE: Detect prohibited, restricted, and problematic language under FINRA Rule 2210 and SEC regulations.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Audience: {{classify_request_type.audience}}\\n- Content: {{classify_request_type.content_extracted}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific prohibited statement\\\", \\\"rule_violated\\\": \\\"FINRA Rule 2210|SEC Rule\\\", \\\"explanation\\\": \\\"why prohibited\\\", \\\"suggested_alternative\\\": \\\"compliant wording\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\"\\n}\\n\\nPERMITTED MARKETING LANGUAGE (DO NOT FLAG):\\nA competent CCO recognizes that standard marketing puffery is acceptable and expected. The following categories are PERMITTED and should NOT be flagged as issues:\\n\\n**Service/Firm Quality Superlatives (ALWAYS OK):**\\n- \\\"world-class service\\\", \\\"exceptional team\\\", \\\"dedicated professionals\\\"\\n- \\\"innovative approach\\\", \\\"cutting-edge strategies\\\", \\\"sophisticated solutions\\\"\\n- \\\"passionate about investing\\\", \\\"committed to clients\\\", \\\"tailored solutions\\\"\\n- \\\"leading firm\\\", \\\"trusted partner\\\", \\\"decades of experience\\\"\\n- \\\"bespoke portfolios\\\", \\\"boutique approach\\\", \\\"institutional quality\\\"\\n- \\\"rigorous process\\\", \\\"disciplined methodology\\\", \\\"proven framework\\\"\\n\\n**Aspirational/Mission Language (ALWAYS OK):**\\n- \\\"helping clients achieve their goals\\\", \\\"empowering investors\\\"\\n- \\\"building long-term wealth\\\", \\\"preserving capital over time\\\"\\n- \\\"putting clients first\\\", \\\"aligning interests with clients\\\"\\n\\n**Conditional/Aspirational Performance (OK with appropriate disclaimers):**\\n- \\\"seeking to outperform\\\", \\\"aiming for strong risk-adjusted returns\\\"\\n- \\\"focused on long-term alpha\\\", \\\"targeting attractive returns\\\"\\n- \\\"strives to deliver consistent results\\\" (not a promise)\\n\\nKEY DISTINCTION — PUFFERY vs. SUBSTANTIVE CLAIMS:\\nPuffery = subjective, non-verifiable opinion about quality or approach → PERMITTED\\nSubstantive claim = specific, verifiable assertion about investment outcomes or regulatory status → REQUIRES substantiation or is prohibited\\n\\nEXAMPLES OF THE DISTINCTION:\\n✓ \\\"Exceptional risk management\\\" → Puffery about process → OK\\n✗ \\\"Best risk-adjusted returns in our peer group\\\" → Verifiable ranking claim → Needs proof or MEDIUM flag\\n✓ \\\"We've delivered strong results for clients\\\" → General puffery → OK\\n✗ \\\"We've returned 15% annually for 10 years\\\" without disclaimer → Specific claim → HIGH flag\\n✓ \\\"Amazing team of analysts\\\" → Puffery about people → OK\\n✗ \\\"Amazing returns guaranteed\\\" → Return guarantee → HIGH flag\\n\\nSEVERITY CLASSIFICATION:\\n**HIGH** (Absolutely prohibited - immediate rejection):\\n- Guarantees of investment returns (\\\"guaranteed\\\", \\\"promise\\\", \\\"assure\\\" + return/profit)\\n- Risk misrepresentation (\\\"no risk\\\", \\\"risk-free\\\", \\\"safe investment\\\")\\n- False regulatory claims (\\\"SEC approved\\\", \\\"FINRA endorsed\\\")\\n- Promises of specific future returns (\\\"will return X%\\\")\\n\\n**MEDIUM** (Restricted - requires revision):\\n- Unsubstantiated PERFORMANCE rankings (\\\"#1 fund\\\", \\\"best returns\\\", \\\"top performer\\\") without data source\\n- Absolute statements about INVESTMENT OUTCOMES (\\\"always outperforms\\\", \\\"never loses money\\\")\\n- Promissory investment language (\\\"will outperform the market\\\", \\\"will deliver alpha\\\")\\n- Specific future projections stated as fact (\\\"will achieve 10%\\\")\\n NOTE: Superlatives about SERVICE QUALITY are NOT MEDIUM — they are puffery and permitted\\n\\n**LOW** (Minor — note for completeness, do not block approval):\\n- Vague performance claims needing specifics (\\\"strong performance\\\" alongside actual numbers)\\n- Terminology that could be clarified for retail audiences\\n- Minor promotional enthusiasm that stops well short of substantive claims\\n\\nPROHIBITED PATTERNS:\\n- \\\"guaranteed returns\\\", \\\"guarantee profits\\\", \\\"promise returns\\\"\\n- \\\"no risk\\\", \\\"risk-free\\\", \\\"can't lose\\\", \\\"safe investment\\\"\\n- \\\"approved by SEC/FINRA\\\"\\n- \\\"#1 fund\\\" or \\\"best performing\\\" without data source (MEDIUM, not HIGH)\\n- \\\"will always outperform\\\", \\\"never loses money\\\"\\n- \\\"will return X%\\\", \\\"will achieve X% annually\\\"\\n\\nCONTEXT MATTERS:\\n✓ \\\"FDIC insured\\\" for bank products → OK\\n✓ \\\"SEC registered\\\" → OK (factual)\\n✓ \\\"World-class investment team\\\" → OK (service puffery)\\n✓ \\\"Exceptional results for our clients\\\" → OK (general puffery, not a specific claim)\\n✗ \\\"SEC approved\\\" → NEVER OK\\n✗ \\\"Guaranteed returns\\\" → NEVER OK\\n\\nEDGE CASES:\\n• \\\"Guarantee our service quality\\\" → OK (service guarantee, not return guarantee)\\n• \\\"Government securities guarantee\\\" → OK if truly government-backed\\n• \\\"Best fit for your needs\\\" → OK (service puffery, not investment claim)\\n• \\\"Best performing fund in our category\\\" → MEDIUM (verifiable claim needs data)\\n• \\\"Always available to answer\\\" → OK (customer service commitment)\\n• \\\"Never miss a payment\\\" about bonds → HIGH (can't guarantee investment outcomes)\\n• \\\"Expected to return 8%\\\" → MEDIUM (needs projection disclaimer)\\n• \\\"Consistently strong performance\\\" without specific numbers → LOW at most\\n• \\\"Amazing investment team\\\" → OK (puffery about people)\\n• \\\"Amazing returns this year!\\\" with a specific % → MEDIUM (specific claim needs context)\\n\\nRULES:\\n- FINRA Rule 2210: Communications with the Public\\n- SEC Rule 10b-5: Prohibition on Fraud\\n- SEC Rule 156: Investment Company Sales Literature\\n\\nSAFE-FAIL:\\n- Uncertain if prohibited → Consider whether it is a substantive verifiable claim or mere puffery\\n- If puffery → Do not flag\\n- If substantive claim without support → Flag as MEDIUM\\n- Vague promotional language with no specific claim → Flag as LOW only if it genuinely could mislead\\n- Always provide rule references and compliant alternatives for any flagged items\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze for prohibited and restricted language"
+      },
+      "position": {
+        "x": 800,
+        "y": 500
+      }
+    },
+    {
+      "id": "analyze_performance_claims",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true AND ({{classify_content_complexity.requires_performance_analysis}} == true OR {{classify_content_complexity.complexity}} is MODERATE or COMPREHENSIVE).\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3500,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a performance claims analyzer for financial services compliance.\\n\\nOBJECTIVE: Ensure performance presentations meet FINRA and SEC requirements.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Audience: {{classify_request_type.audience}}\\n- Content: {{classify_request_type.content_extracted}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"rule_violated\\\": \\\"rule\\\", \\\"explanation\\\": \\\"why required\\\", \\\"required_disclosure\\\": \\\"exact text needed\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\",\\n  \\\"requires_standardized_performance\\\": true|false,\\n  \\\"requires_benchmark_disclosure\\\": true|false,\\n  \\\"requires_net_of_fees_disclosure\\\": true|false,\\n  \\\"requires_past_performance_disclaimer\\\": true|false\\n}\\n\\nSEVERITY:\\n**HIGH:** Performance without disclaimers, cherry-picked periods, gross vs net issues, misleading benchmarks\\n**MEDIUM:** Missing standard periods (1,5,10yr), incomplete benchmark ID, vague fees\\n**LOW:** Could strengthen disclaimers, minor formatting\\n\\nREQUIRED ELEMENTS:\\n\\n**1. STANDARDIZED PERIODS (FINRA 2210)**\\nMUST show: 1-year, 5-year, 10-year, since inception\\nException: If < 1 year old, inception only\\nRed Flags: Only best period, custom dates without standard\\n\\n**2. NET OF FEES (SEC/FINRA)**\\nMUST state: Gross or net? Which fees deducted? Impact if gross?\\nRed Flags: No fee mention, vague \\\"net of fees\\\"\\n\\n**3. PAST PERFORMANCE DISCLAIMER**\\nREQUIRED: \\\"Past performance does not guarantee future results\\\"\\nRed Flag: Performance shown without disclaimer\\n\\n**4. BENCHMARK (if comparison)**\\nMUST: Full name, Total Return vs Price Index, why appropriate\\nRed Flags: \\\"vs benchmark\\\" without naming, inappropriate benchmark\\n\\n**5. RANKING/QUARTILE**\\nMUST: Data source, peer group, time period, # of funds\\nRed Flag: \\\"Top quartile\\\" without source\\n\\nVIOLATION PATTERNS:\\n- Cherry-picking: Only favorable periods\\n- Incomplete: \\\"Returned 15%\\\" (missing period, net/gross, disclaimer)\\n- Misleading: Comparing apples to oranges\\n- Hypothetical: Back-tested without clear labeling\\n\\nACCEPTABLE:\\n✓ \\\"XYZ Fund returned 12.5% in 2024 (net), vs S&P 500 Total Return 11.2%. Past performance does not guarantee future results.\\\"\\n\\nPROBLEMATIC:\\n✗ \\\"15% return!\\\" (missing everything)\\n✗ \\\"Beat the market\\\" (which market? when?)\\n\\nSPECIAL CASES:\\n- New funds < 1yr: Inception only, note limited history\\n- Composites: Label clearly, disclose methodology\\n- SMAs: Must be representative\\n\\nEDGE CASES:\\n• \\\"Strong performance\\\" without numbers → Vague, needs specifics or remove\\n• Different decimal places → Ensure consistency\\n• \\\"Since manager took over\\\" → Needs standard periods too\\n• Different share classes → Clear which shown\\n\\nRULES:\\n- FINRA Rule 2210(d)(1)(F)\\n- SEC Rule 156\\n- SEC Rule 206(4)-1\\n\\nSAFE-FAIL:\\n- Performance without numbers → Flag needing specifics\\n- Ambiguous period → MEDIUM issue\\n- Weak disclaimers → LOW with strengthening suggestion\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze performance claims and disclosures"
+      },
+      "position": {
+        "x": 800,
+        "y": 650
+      }
+    },
+    {
+      "id": "analyze_risk_disclosures",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true AND ({{classify_content_complexity.requires_risk_analysis}} == true OR {{classify_asset_class.highest_complexity}} is HIGH or VERY_HIGH).\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a risk disclosure analyzer for financial services compliance.\\n\\nOBJECTIVE: Ensure adequate risk disclosure based on content and asset complexity.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Audience: {{classify_request_type.audience}}\\n- Content: {{classify_request_type.content_extracted}}\\n- Asset Complexity: {{classify_asset_class.highest_complexity}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"rule_violated\\\": \\\"rule\\\", \\\"explanation\\\": \\\"why required\\\", \\\"required_disclosure\\\": \\\"exact text needed\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\",\\n  \\\"requires_loss_of_principal_warning\\\": true|false,\\n  \\\"requires_illiquidity_warning\\\": true|false,\\n  \\\"requires_suitability_disclosure\\\": true|false\\n}\\n\\nSEVERITY:\\n**HIGH:** No risk disclosure for risky products, performance without risk context, misleading risk\\n**MEDIUM:** Weak/vague risk disclosure, missing specific risks, buried disclaimers\\n**LOW:** Could strengthen existing disclosures\\n\\nRISK REQUIREMENTS BY ASSET COMPLEXITY:\\n\\n**LOW/MODERATE:**\\nMINIMUM: \\\"All investments involve risk, including possible loss of principal. Past performance does not guarantee future results.\\\"\\n\\n**HIGH (Options, Derivatives, Leveraged, Alternatives):**\\nREQUIRED:\\n- Substantial risk of loss (prominent)\\n- Not suitable for all investors\\n- Suitability considerations\\n- Liquidity risks if applicable\\n- Leverage disclosure and loss amplification\\n- Complexity warnings\\n\\n**VERY HIGH (Hedge Funds, Private Placements):**\\nREQUIRED (prominent):\\n- Risk of total loss\\n- Illiquidity and lock-up periods\\n- Lack of daily pricing\\n- Accredited investor requirements (retail)\\n- Lack of SEC registration (if applicable)\\n- Complex fee structure impact\\n- Leverage and derivative risks\\n- Limited transparency\\n\\nFAIR & BALANCED (FINRA 2210):\\n- Risks proportional to benefits\\n- Not buried in fine print\\n- Clear, prominent placement\\n- Appropriate emphasis\\n\\nVIOLATION PATTERNS:\\n- Missing Risk (HIGH): Performance with no risk language\\n- Inadequate (MEDIUM): Vague \\\"subject to risk\\\" without specifics\\n- Misleading (HIGH): Downplaying significant risks\\n\\nRULES:\\n- FINRA Rule 2210(d)(1)(A): Fair and Balanced\\n- FINRA Rule 2210(d)(1)(E): Risk Disclosure\\n- SEC Rule 156\\n\\nSAFE-FAIL:\\n- HIGH/VERY HIGH assets without strong risk disclosure → HIGH issue\\n- Performance discussed without risk context → HIGH issue\\n- Vague/generic risks → MEDIUM with specific suggestions\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze risk disclosure adequacy"
+      },
+      "position": {
+        "x": 800,
+        "y": 800
+      }
+    },
+    {
+      "id": "analyze_testimonials",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true AND ({{classify_content_complexity.requires_testimonial_analysis}} == true OR {{classify_content_complexity.has_testimonials}} == true).\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a testimonials and endorsements analyzer for financial services compliance.\\n\\nOBJECTIVE: Ensure testimonials meet FINRA Rule 2210 and IA Act Rule 206(4)-1 requirements.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Content: {{classify_request_type.content_extracted}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"rule_violated\\\": \\\"rule\\\", \\\"explanation\\\": \\\"why required\\\", \\\"required_disclosure\\\": \\\"exact text\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\",\\n  \\\"requires_compensation_disclosure\\\": true|false,\\n  \\\"requires_atypical_results_disclosure\\\": true|false\\n}\\n\\nSEVERITY:\\n**HIGH:** Testimonial without required disclosures, compensation not disclosed, misleading\\n**MEDIUM:** Incomplete disclosures, vague attribution, missing context\\n**LOW:** Could strengthen existing disclosures\\n\\nREQUIRED DISCLOSURES:\\n\\n**1. COMPENSATION (Required)**\\nMUST disclose if provider compensated:\\n✓ \\\"Client was not compensated for this testimonial\\\"\\n✓ \\\"Client received a $50 gift card\\\"\\nRed Flag: NO compensation disclosure\\n\\n**2. ATYPICAL RESULTS**\\nREQUIRED: \\\"Results not typical\\\" or \\\"Individual results may vary\\\"\\nRed Flag: Specific results without disclaimer\\n\\n**3. MATERIAL CONFLICTS**\\nMUST disclose: family member, affiliated, material relationship\\n\\n**4. NO REGULATOR IMPLICATION**\\nCANNOT imply SEC/FINRA endorsement\\n\\nTHIRD-PARTY RATINGS:\\nMUST disclose: Who gave award, criteria, date, if paid\\n\\nVIOLATION PATTERNS:\\n- Missing Disclosures (HIGH): Client quote with no compensation disclosure\\n- Incomplete (MEDIUM): Generic \\\"results vary\\\" buried in footnote\\n- Misleading (HIGH): Cherry-picked testimonials only\\n\\nACCEPTABLE:\\n✓ \\\"'Working with [Advisor] has helped our retirement planning,' says John S., client since 2020. Client was not compensated. Individual experiences may not be representative.\\\"\\n\\nPROBLEMATIC:\\n✗ \\\"Best advisor ever!\\\" - Client (missing compensation disclosure, atypical disclaimer)\\n\\nRULES:\\n- FINRA Rule 2210(d)(6)\\n- IA Act Rule 206(4)-1(b)\\n\\nSAFE-FAIL:\\n- Any client quote → Requires disclosures\\n- Third-party rating → Requires attribution\\n- Uncertain if compensated → Flag and require disclosure\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze testimonials and endorsements"
+      },
+      "position": {
+        "x": 800,
+        "y": 200
+      }
+    },
+    {
+      "id": "analyze_communications_standards",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true.\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a communications standards analyzer for financial services compliance.\\n\\nOBJECTIVE: Ensure content is fair, balanced, and not misleading per FINRA Rule 2210.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Audience: {{classify_request_type.audience}}\\n- Channel: {{classify_request_type.channel}}\\n- Content: {{classify_request_type.content_extracted}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"rule_violated\\\": \\\"rule\\\", \\\"explanation\\\": \\\"why problematic\\\", \\\"suggested_revision\\\": \\\"how to fix\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\",\\n  \\\"is_balanced\\\": true|false,\\n  \\\"has_material_omissions\\\": true|false\\n}\\n\\nCRITICAL FIRST STEP — CATEGORIZE THE CONTENT:\\nBefore applying any standards, determine what TYPE of content you are reviewing. Different content types have fundamentally different requirements:\\n\\n**TYPE A: Brand/Firm Marketing (Taglines, Mission, Service Descriptions)**\\nExamples: \\\"Empowering investors since 1985\\\", \\\"A trusted partner for institutional clients\\\", \\\"World-class service, delivered personally\\\", \\\"Innovative solutions for complex portfolios\\\"\\nRequirements: Must not be outright false. Does NOT require risk disclosures. Does NOT require investment balance. Promotional enthusiasm is expected and appropriate.\\n\\n**TYPE B: Product/Strategy Descriptions (What the fund/strategy does)**\\nExamples: \\\"The fund invests in large-cap US equities seeking long-term capital appreciation\\\", \\\"Our long/short strategy targets absolute returns\\\"\\nRequirements: Must be accurate. Risk appropriate to complexity. Does NOT require exhaustive disclaimers unless making specific outcome claims.\\n\\n**TYPE C: Investment Performance and Outcome Claims (Specific returns, rankings, comparisons)**\\nExamples: \\\"Returned 15% in 2024\\\", \\\"Top quartile since inception\\\", \\\"Outperformed the S&P 500 by 200bps\\\"\\nRequirements: Full FINRA 2210 fair and balanced standards apply. Past performance disclaimer required. Benchmark identification required. This is where strict standards apply.\\n\\n**TYPE D: Investment Recommendations and Advice**\\nExamples: \\\"Now is the time to invest\\\", \\\"We recommend adding to equities\\\", suitability implications\\nRequirements: Suitability, balance, and fair presentation rules fully apply.\\n\\nAPPLY STANDARDS BY TYPE:\\n\\nCORE STANDARDS:\\n\\n**1. FAIR AND BALANCED (FINRA 2210(d)(1)(A))**\\nApplies to: TYPE C and TYPE D content only.\\nBrand marketing (TYPE A) and product descriptions (TYPE B) do NOT require investment risk to be paired with every positive statement.\\n\\nBalanced (required for TYPE C):\\n✓ \\\"Fund returned 18% in 2024 (net), vs S&P 500 total return of 11.2%. Past performance does not guarantee future results. Investing involves risk of loss.\\\"\\n\\nAcceptable brand copy (TYPE A — no balance required):\\n✓ \\\"Helping clients build wealth for over three decades.\\\"\\n✓ \\\"Exceptional service, delivered by a dedicated team.\\\"\\n✓ \\\"Innovative, risk-aware approach to portfolio construction.\\\"\\n\\nUnbalanced (TYPE C — requires fix):\\n✗ \\\"18% return in 2024!\\\" with no past performance disclaimer and no risk context\\n\\nSEVERITY: HIGH if TYPE C content (specific returns/rankings) has NO risk context whatsoever; LOW or non-issue if TYPE A brand copy is enthusiastic.\\n\\n**2. NOT MISLEADING (FINRA 2210(d)(1)(B))**\\nCANNOT:\\n- Omit material facts that would change an investor's understanding of an investment\\n- Make factually false statements about the firm or product\\n- Use misleading charts that distort performance\\n- Imply non-existent guarantees of returns\\n- Misrepresent product features\\nNOTE: Enthusiastic but non-specific marketing language (\\\"exceptional\\\", \\\"innovative\\\", \\\"leading\\\") is NOT misleading — it is normal commercial speech.\\n\\n**3. SOUND BASIS (FINRA 2210(d)(1)(C))**\\nApplies to specific, verifiable factual claims only — not to marketing puffery.\\n\\nRequires substantiation:\\n✓ \\\"90% client retention rate (internal data, 2024)\\\" — specific metric, needs data\\n✓ \\\"Top quartile Sharpe ratio per Morningstar\\\" — specific ranking, needs source\\n\\nDoes NOT require substantiation:\\n✓ \\\"Trusted by clients for decades\\\" — general puffery\\n✓ \\\"We work hard to generate strong risk-adjusted returns\\\" — aspirational, not a specific claim\\n✓ \\\"Most clients choose to stay with us long-term\\\" — acceptable general statement\\n\\n**4. MATERIAL OMISSIONS**\\nApplies when specific investment facts are presented selectively in a way that creates a false impression. Does not apply to brand positioning copy.\\nMUST disclose information necessary for fair understanding of an investment — not every possible caveat to every marketing statement.\\n\\nCOMMON ISSUES (properly calibrated):\\n- Imbalance (HIGH): Specific performance numbers with no risk context or past performance disclaimer\\n- Imbalance (MEDIUM): Product description with specific outcome claims but no risk mention\\n- Imbalance (NON-ISSUE): Brand copy that emphasizes positives — this is normal and acceptable\\n- Vague Claims (LOW or NON-ISSUE): \\\"Strong performance\\\" as standalone phrase — mention only if a specific number follows that lacks context\\n- Missing Context (MEDIUM): Returns without time period or net/gross designation\\n- Tone Issues (NON-ISSUE by default): Promotional enthusiasm is acceptable and expected in marketing\\n\\nCHANNEL-SPECIFIC:\\n**Social Media:** Limited space = disclosures must link out if content makes specific claims; brand copy needs no disclosure\\n**Email:** Subject line can't be factually misleading; promotional subject lines are fine\\n**Websites:** Performance disclosures on same page; brand sections need no disclaimers\\n**Pitchbooks:** Each slide with performance data must stand alone fairly; brand/intro slides are fine without disclaimers\\n\\nAUDIENCE:\\n**Retail:** Investment claims must be understandable to average investor, plain English; brand copy can use aspirational language freely\\n**Institutional:** Can use technical language throughout; still must be fair on specific claims\\n\\nRULES:\\n- FINRA Rule 2210(d)(1): Content Standards\\n- SEC Rule 10b-5: Anti-fraud\\n- SEC Rule 156\\n\\nSAFE-FAIL:\\n- Specific investment performance or outcome claims without risk context → Flag as imbalanced (severity based on claim specificity)\\n- Brand/service copy without investment claims → Do NOT flag as imbalanced\\n- Verifiable factual claims without sourcing → Flag for substantiation\\n- Aspirational or puffery language → Do NOT flag\\n- Complexity genuinely downplayed to create a false impression → Flag as misleading\\n- Material investment facts missing from performance presentation → Flag as omission\\n- General promotional enthusiasm → Do NOT flag\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze general communications standards"
+      },
+      "position": {
+        "x": 800,
+        "y": 950
+      }
+    },
+    {
+      "id": "analyze_recordkeeping",
+      "type": "TOOL",
+      "config": {
+        "id": "5052689248818429952",
+        "name": "OpenAI_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true.\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"gpt-4o\",\n  \"temperature\": 0.3,\n  \"max_tokens\": 2000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a recordkeeping requirements analyzer for financial services compliance.\\n\\nOBJECTIVE: Determine recordkeeping metadata and retention requirements per FINRA/SEC rules.\\n\\nINPUTS:\\n- Firm: {{classify_request_type.firm_type}}\\n- Audience: {{classify_request_type.audience}}\\n- Channel: {{classify_request_type.channel}}\\n- Word Count: {{classify_content_complexity.word_count}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"communication_type\\\": \\\"Retail Communication|Institutional Communication|Correspondence\\\",\\n  \\\"requires_principal_approval\\\": true|false,\\n  \\\"requires_pre_use_filing\\\": true|false,\\n  \\\"retention_period_years\\\": number,\\n  \\\"special_requirements\\\": [\\\"list\\\"],\\n  \\\"filing_category\\\": \\\"category or null\\\"\\n}\\n\\nCLASSIFICATION:\\n\\n**Retail Communication (FINRA 2210(a)(6))**\\nDistributed to >25 retail investors within 30 days\\nChannels: Social media, websites, mass emails, ads, factsheets\\nRequirements: Principal approval BEFORE use, 3-year retention, some require FINRA filing\\n\\n**Institutional Communication (FINRA 2210(a)(3))**\\nDistributed only to institutional investors\\nRequirements: Supervision required, 3-year retention, no filing\\n\\n**Correspondence (FINRA 2210(a)(2))**\\nWritten to ≤25 retail investors within 30 days\\nExamples: Individual emails, one-on-one messages\\nRequirements: Supervision, 3-year retention, no pre-approval\\n\\nRETENTION: 3 years (SEC Rule 17a-4, IA Act Rule 204-2)\\n\\nPRINCIPAL APPROVAL:\\n**ALWAYS required:**\\n- Retail communications (>25 retail)\\n- All advertisements\\n- Public websites\\n- Social media posts\\n\\n**Supervision but not pre-approval:**\\n- Institutional communications\\n- Correspondence\\n\\nPRE-USE FILING WITH FINRA (Rule 2210(c)):\\n**Must file within 10 days IF:**\\n1. New member (first year) for all retail comms OR\\n2. Specific products: Investment company, DPPs, CMOs, options\\n\\n**Exceptions (no filing):**\\n- Correspondence\\n- Institutional communications\\n- Previously filed material reused\\n\\nDECISION LOGIC:\\nIF audience = Retail AND (channel = Social OR Email OR Website OR Factsheet OR Pitchbook):\\n  → Retail Communication\\n  → requires_principal_approval = true\\n  → retention_period_years = 3\\n\\nIF audience = Institutional:\\n  → Institutional Communication\\n  → requires_principal_approval = false\\n  → retention_period_years = 3\\n\\nEXAMPLES:\\n\\nRetail + Social + stocks:\\n{\\n  \\\"communication_type\\\": \\\"Retail Communication\\\",\\n  \\\"requires_principal_approval\\\": true,\\n  \\\"requires_pre_use_filing\\\": false,\\n  \\\"retention_period_years\\\": 3,\\n  \\\"special_requirements\\\": [\\\"Social Media: Monitor for public responses\\\"],\\n  \\\"filing_category\\\": null\\n}\\n\\nRetail + Factsheet + mutual funds:\\n{\\n  \\\"communication_type\\\": \\\"Retail Communication\\\",\\n  \\\"requires_principal_approval\\\": true,\\n  \\\"requires_pre_use_filing\\\": true,\\n  \\\"retention_period_years\\\": 3,\\n  \\\"special_requirements\\\": [\\\"Investment Company: Prospectus delivery may be required\\\"],\\n  \\\"filing_category\\\": \\\"Investment Company Retail Communication\\\"\\n}\\n\\nInstitutional + Email:\\n{\\n  \\\"communication_type\\\": \\\"Institutional Communication\\\",\\n  \\\"requires_principal_approval\\\": false,\\n  \\\"requires_pre_use_filing\\\": false,\\n  \\\"retention_period_years\\\": 3,\\n  \\\"special_requirements\\\": [\\\"Supervision and review required\\\"],\\n  \\\"filing_category\\\": null\\n}\\n\\nEDGE CASES:\\n• Email to 26 retail → Retail Communication (>25)\\n• Email to 24 retail → Correspondence (<25)\\n• Website visible to public → Retail Communication\\n• Social media → Retail Communication\\n\\nRULES:\\n- FINRA Rule 2210: Communications\\n- SEC Rule 17a-4: BD Recordkeeping\\n- IA Act Rule 204-2: RIA Recordkeeping\\n\\nSAFE-FAIL:\\n- Unclear if retail or institutional → Default to Retail (more restrictive)\\n- Uncertain about filing → Include in special_requirements for manual review\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "OpenAI_chat",
+        "description": "Analyze recordkeeping and filing requirements"
+      },
+      "position": {
+        "x": 800,
+        "y": 350
+      }
+    },
+    {
+      "id": "analyze_hedge_fund_disclosures",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true AND {{classify_asset_class.run_hedge_fund_analyzer}} == true.\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a hedge fund specific disclosure analyzer.\\n\\nOBJECTIVE: Validate hedge fund-specific disclosure requirements.\\n\\nINPUTS:\\n- Content: {{classify_request_type.content_extracted}}\\n- Audience: {{classify_request_type.audience}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"explanation\\\": \\\"why required\\\", \\\"required_disclosure\\\": \\\"exact text needed\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\"\\n}\\n\\nREQUIRED HEDGE FUND DISCLOSURES:\\n\\n**1. ACCREDITED INVESTOR (HIGH - if retail)**\\nMUST state for retail:\\n\\\"This investment is available only to accredited investors as defined under Regulation D.\\\"\\nRed Flag: Retail audience without accredited disclosure\\n\\n**2. RISK OF TOTAL LOSS (HIGH)**\\nMUST include prominent:\\n\\\"Investors may lose their entire investment\\\" or \\\"Risk of total loss of capital\\\"\\nRed Flag: No total loss warning\\n\\n**3. ILLIQUIDITY/LOCK-UP (HIGH)**\\nMUST disclose:\\n- Lock-up periods\\n- Redemption restrictions\\n- Liquidity terms\\n- Advance notice requirements\\nExample: \\\"Initial 1-year lock-up. Quarterly redemptions thereafter with 60-day notice.\\\"\\nRed Flag: No liquidity terms\\n\\n**4. PERFORMANCE FEES (MEDIUM)**\\nMUST disclose:\\n- Management fee (e.g., 1.5%)\\n- Performance/incentive fee (e.g., 20%)\\n- Hurdle rate if applicable\\n- High water mark\\nExample: \\\"Management fee: 1.5% annually. Performance allocation: 20% of profits over 8% hurdle with high water mark.\\\"\\nRed Flag: Vague \\\"competitive fees\\\"\\n\\n**5. LEVERAGE (MEDIUM)**\\nIf fund uses leverage, MUST disclose:\\n- Maximum leverage ratio\\n- How leverage amplifies losses\\nExample: \\\"Fund may employ leverage up to 3:1, which will amplify both gains and losses.\\\"\\n\\n**6. LACK OF LIQUIDITY (HIGH)**\\nMUST warn:\\n\\\"No public market exists for these securities. Transfer restrictions apply.\\\"\\n\\n**7. LIMITED TRANSPARENCY (MEDIUM)**\\nShould note:\\n- Less frequent reporting vs mutual funds\\n- Limited regulatory oversight\\n\\nCOMPLETE EXAMPLE:\\n\\\"ABC Hedge Fund LP is available only to accredited investors and qualified purchasers. This is a speculative investment involving a high degree of risk, including risk of total loss of capital. Fund employs leverage up to 3:1 which will amplify losses. Initial 1-year lock-up with quarterly redemptions thereafter on 60-day notice. No public market for securities and transfer is restricted. Management fee: 1.5%. Performance allocation: 20% over 6% hurdle. Fund is not registered under the Investment Company Act of 1940.\\\"\\n\\nRULES:\\n- Securities Act Rule 506\\n- Investment Advisers Act\\n\\nSAFE-FAIL:\\n- Retail + hedge fund → REQUIRE accredited investor language\\n- Any hedge fund → Verify total loss risk disclosed\\n- Vague fees → Flag for specific disclosure\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze hedge fund specific disclosures"
+      },
+      "position": {
+        "x": 800,
+        "y": 1100
+      }
+    },
+    {
+      "id": "analyze_private_placement_disclosures",
+      "type": "TOOL",
+      "config": {
+        "id": "5052701148151152640",
+        "name": "Claude_chat",
+        "params": {},
+        "prompt": "Execution guard: Execute only when {{classify_request_type.is_compliance_request}} == true AND {{classify_asset_class.run_private_placement_analyzer}} == true.\n\nUse EXACTLY these call parameters:\n{\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"temperature\": 0.5,\n  \"max_tokens\": 3000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a private placement (Reg D) specific disclosure analyzer.\\n\\nOBJECTIVE: Validate Regulation D private placement disclosure requirements.\\n\\nINPUTS:\\n- Content: {{classify_request_type.content_extracted}}\\n- Audience: {{classify_request_type.audience}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"issues\\\": [{\\\"severity\\\": \\\"HIGH|MEDIUM|LOW\\\", \\\"issue\\\": \\\"specific issue\\\", \\\"explanation\\\": \\\"why required\\\", \\\"required_disclosure\\\": \\\"exact text needed\\\"}],\\n  \\\"has_issues\\\": true|false,\\n  \\\"highest_severity\\\": \\\"HIGH|MEDIUM|LOW|NONE\\\"\\n}\\n\\nREQUIRED PRIVATE PLACEMENT DISCLOSURES:\\n\\n**1. UNREGISTERED OFFERING (HIGH)**\\nMUST state:\\n\\\"These securities have not been registered with the SEC\\\" or \\\"This is an unregistered offering\\\"\\nRed Flag: No mention of lack of SEC registration\\n\\n**2. ACCREDITED INVESTOR (HIGH - especially 506(c))**\\nMUST disclose:\\n- Rule 506(b): Accredited investors + up to 35 sophisticated\\n- Rule 506(c): Only accredited investors, verification required\\nExample: \\\"This offering is conducted under Rule 506(c) of Regulation D and is available only to verified accredited investors.\\\"\\nRed Flag: Reg D without accreditation requirements\\n\\n**3. TRANSFER RESTRICTIONS (HIGH)**\\nMUST warn:\\n\\\"Securities are restricted and may not be transferred except in compliance with securities laws\\\"\\nExample: \\\"These securities are subject to substantial restrictions on transfer and may not be sold except in compliance with Rule 144 or other exemptions.\\\"\\nRed Flag: No transfer restrictions mentioned\\n\\n**4. RISK OF TOTAL LOSS (HIGH)**\\nMUST include:\\n\\\"Investors may lose their entire investment\\\" or \\\"This involves a high degree of risk\\\"\\nRed Flag: No total loss warning\\n\\n**5. ILLIQUIDITY (HIGH)**\\nMUST disclose:\\n- No public market exists\\n- Securities are illiquid\\n- No guarantee of liquidity event\\nExample: \\\"There is no public market for these securities and none is expected to develop. The securities are illiquid.\\\"\\nRed Flag: Private placement without illiquidity disclosure\\n\\n**6. LIMITED INFORMATION (MEDIUM)**\\nShould note:\\n- Less information vs registered offerings\\n- No SEC review of offering materials\\nExample: \\\"The offering has not been reviewed by the SEC. Investors will have access to limited information compared to registered securities.\\\"\\n\\n**7. SUITABILITY (MEDIUM)**\\nShould include:\\n- Investment suitable only for investors who can afford to lose entire amount\\n- Requires financial sophistication\\n\\nCOMPLETE EXAMPLE:\\n\\\"XYZ Fund is offering securities in a private placement under Rule 506(c) of Regulation D. These securities are not registered with the SEC and are available only to verified accredited investors. This is a speculative investment involving a high degree of risk, including risk of total loss of invested capital. There is no public market for the securities and transfer is subject to substantial restrictions under federal and state securities laws. Investors will have access to limited information compared to SEC-registered offerings. This investment is suitable only for sophisticated investors who can afford to lose their entire investment.\\\"\\n\\nREG D RULE SPECIFICS:\\n**Rule 506(b):** Up to 35 non-accredited (but sophisticated) allowed, no general solicitation\\n**Rule 506(c):** ONLY accredited, general solicitation allowed, MUST verify accreditation\\n\\nRULES:\\n- Securities Act Rule 506\\n- Regulation D\\n- Rule 144 (resales)\\n\\nSAFE-FAIL:\\n- Any Reg D mention → Verify unregistered disclosure\\n- Retail + private placement → REQUIRE accredited language\\n- If 506(c) → Must mention verification requirement\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "Claude_chat",
+        "description": "Analyze private placement specific disclosures"
+      },
+      "position": {
+        "x": 800,
+        "y": 1250
+      }
+    },
+    {
+      "id": "synthesize_results",
+      "type": "TOOL",
+      "config": {
+        "id": "5052689248818429952",
+        "name": "OpenAI_chat",
+        "params": {},
+        "prompt": "Use EXACTLY these call parameters:\n{\n  \"model\": \"gpt-4o\",\n  \"temperature\": 0.4,\n  \"max_tokens\": 4000,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"You are a compliance synthesis expert. Aggregate all analyzer results into comprehensive review.\\n\\nINPUTS:\\n- Classification: {{classify_request_type}}\\n- Complexity: {{classify_content_complexity}}\\n- Asset Classes: {{classify_asset_class}}\\n- Prohibited: {{analyze_prohibited_statements}}\\n- Performance: {{analyze_performance_claims}}\\n- Risk: {{analyze_risk_disclosures}}\\n- Testimonials: {{analyze_testimonials}}\\n- Communications: {{analyze_communications_standards}}\\n- Recordkeeping: {{analyze_recordkeeping}}\\n- Hedge Fund: {{analyze_hedge_fund_disclosures}}\\n- Private Placement: {{analyze_private_placement_disclosures}}\\n\\nOUTPUT SCHEMA (Return ONLY valid JSON):\\n{\\n  \\\"overall_risk\\\": \\\"LOW|MEDIUM|HIGH|CRITICAL\\\",\\n  \\\"status\\\": \\\"ACCEPT|NEEDS CHANGES|REJECT|ESCALATION REQUIRED\\\",\\n  \\\"high_severity_issues\\\": [\\\"issue1\\\", \\\"issue2\\\"],\\n  \\\"medium_severity_issues\\\": [\\\"issue1\\\"],\\n  \\\"low_severity_issues\\\": [\\\"issue1\\\"],\\n  \\\"required_edits\\\": [{\\\"edit\\\": \\\"specific change\\\", \\\"rationale\\\": \\\"why\\\", \\\"rule\\\": \\\"FINRA/SEC rule\\\"}],\\n  \\\"required_disclosures\\\": \\\"Full block of disclosure text (copy-paste ready)\\\",\\n  \\\"substantiation_needed\\\": [\\\"claim requiring proof\\\"],\\n  \\\"escalation_required\\\": true|false,\\n  \\\"escalation_reason\\\": \\\"reason or null\\\",\\n  \\\"recordkeeping_metadata\\\": {object from recordkeeping},\\n  \\\"analyzers_run\\\": [\\\"list of which analyzers executed\\\"],\\n  \\\"complexity_classification\\\": \\\"from complexity analyzer\\\",\\n  \\\"asset_complexity\\\": \\\"from asset classifier\\\"\\n}\\n\\nOVERALL RISK:\\n**CRITICAL:** Prohibited statements (guarantees, risk-free), missing VERY HIGH asset disclosures for retail, performance without any disclaimers whatsoever, potential fraud, 3+ HIGH issues\\n**HIGH:** 1-2 HIGH issues, HIGH asset without adequate disclosure, material performance violations, testimonial violations\\n**MEDIUM:** 1+ MEDIUM issues, incomplete disclosures where required, 3+ LOW issues that collectively create misleading impression\\n**LOW:** Only LOW issues, minor improvements suggested — content is acceptable to publish with small enhancements\\n\\nIMPORTANT: Multiple LOW issues do NOT automatically escalate to MEDIUM risk. LOW issues are advisory suggestions that do not block approval. Only escalate if the LOW issues collectively create a materially misleading impression.\\n\\nSTATUS:\\n**ACCEPT:** overall_risk = LOW, no HIGH or MEDIUM issues, disclosures adequate for content type — content is approvable\\n**NEEDS CHANGES:** overall_risk = MEDIUM or isolated HIGH issues, fixable with targeted edits — do not reject, require revision\\n**REJECT:** overall_risk = HIGH with multiple HIGH issues or CRITICAL issues requiring substantial rework\\n**ESCALATION REQUIRED:** overall_risk = CRITICAL, prohibited statements, potential fraud, regulatory filing at risk, legal review needed\\n\\nESCALATION TRIGGERS:\\n- Prohibited language specifically about investment returns (guarantees, risk-free)\\n- Missing accredited investor disclosure for VERY HIGH assets marketed to retail\\n- Unregistered offering without proper Reg D disclosures\\n- Performance presented with zero disclaimers and no risk context whatsoever\\n- Fraudulent or materially false factual claims\\n- Testimonial violations that could trigger enforcement action\\n\\nREQUIRED EDITS:\\nFor each HIGH or MEDIUM issue, create specific edit:\\n{\\n  \\\"edit\\\": \\\"Remove 'guaranteed returns' language\\\",\\n  \\\"rationale\\\": \\\"Guarantees prohibited under FINRA 2210\\\",\\n  \\\"rule\\\": \\\"FINRA Rule 2210(d)(1)(B)\\\"\\n}\\nDo NOT create required edits for LOW issues — list those as optional improvements only.\\n\\nREQUIRED DISCLOSURES:\\nCompile into copy-paste ready block. Consolidate to avoid redundancy. Only include disclosures actually required by the content — do not add disclosures speculatively for content that doesn't trigger them.\\n\\nExample:\\n\\\"REQUIRED DISCLOSURES:\\n\\nPast performance is not indicative of future results. All investments involve risk, including possible loss of principal. Returns shown are net of management fees of 1.5% annually.\\n\\nThis investment is available only to accredited investors as defined under Regulation D. Investors may lose their entire investment. The securities are illiquid with no public market, and transfer is restricted. Initial 1-year lock-up with quarterly redemptions thereafter on 90-day notice.\\\"\\n\\nSUBSTANTIATION NEEDED:\\nList only specific verifiable claims that require proof — not aspirational or puffery statements:\\n- \\\"Best performing fund in category\\\" → Needs Morningstar/Lipper data\\n- \\\"90% client retention\\\" → Needs internal records\\n- \\\"Consistently outperforms\\\" with specific numbers → Needs multi-year data\\nDo NOT list general marketing statements (\\\"exceptional service\\\", \\\"world-class team\\\") as requiring substantiation.\\n\\nANALYZERS RUN:\\nTrack which executed: [\\\"analyze_prohibited_statements\\\", \\\"analyze_performance_claims\\\", ...]\\n\\nBALANCED CCO PERSPECTIVE:\\nA good Chief Compliance Officer takes a balanced view. The goal is to protect investors and ensure regulatory compliance — not to sanitize all marketing enthusiasm. Standard marketing language, puffery, and aspirational brand copy serve legitimate business purposes and do not require regulatory intervention. Reserve HIGH severity and REJECT/ESCALATION statuses for genuine regulatory violations. Be constructive and actionable with MEDIUM issues. Reserve LOW issues for informational guidance only.\\n\\nSAFE-FAIL:\\n- Any analyzer flagged HIGH → overall_risk minimum MEDIUM (but evaluate whether the HIGH flag was appropriate given the balanced CCO perspective)\\n- Prohibited investment return statements (guarantees, risk-free) → ESCALATION REQUIRED\\n- Multiple LOW issues from marketing puffery → Do NOT escalate risk; remain LOW\\n- Uncertain about severity → Consider whether a reasonable CCO would actually object to the content; default to the less restrictive interpretation for borderline cases\\n- VERY HIGH assets to retail without disclosures → CRITICAL risk\"}\n  ]\n}",
+        "toolId": "chat",
+        "toolName": "OpenAI_chat",
+        "description": "Synthesize all analyzer results"
+      },
+      "position": {
+        "x": 1150,
+        "y": 725
+      }
+    },
+    {
+      "id": "format_output",
+      "type": "MODEL",
+      "config": {
+        "prompt": "You are the final output formatter. Your sole job is to produce a single, valid JSON object. Do not output any text, markdown, or explanation outside the JSON.\n\nINPUTS:\n- Classification: {{classify_request_type}}\n- Complexity: {{classify_content_complexity}}\n- Assets: {{classify_asset_class}}\n- Synthesis: {{synthesize_results}}\n- Fast Fail: {{fast_fail_handler}}\n\nTHE OUTPUT IS A DISCRIMINATED UNION ON review_type. Use exactly one of the two schemas below. Never mix fields from both schemas in the same response.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCHEMA A — use when {{fast_fail_handler}} has content (request was not a compliance review):\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{\n  \"review_type\": \"REJECTED_REQUEST\",\n  \"reason\": \"string — from {{classify_request_type.rejection_reason}}\",\n  \"message\": \"string — from {{fast_fail_handler}}\"\n}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSCHEMA B — use for all actual compliance reviews:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{\n  \"review_type\": \"COMPLIANCE_REVIEW\",\n  \"summary\": {\n    \"overall_risk\": \"LOW\" | \"MEDIUM\" | \"HIGH\" | \"CRITICAL\",\n    \"status\": \"ACCEPT\" | \"NEEDS CHANGES\" | \"REJECT\" | \"ESCALATION REQUIRED\",\n    \"escalation_required\": true | false,\n    \"escalation_reason\": \"string or null\"\n  },\n  \"classification\": {\n    \"complexity\": \"MINIMAL\" | \"LIGHT\" | \"MODERATE\" | \"COMPREHENSIVE\" | null,\n    \"asset_classes\": [\"string\"],\n    \"highest_asset_complexity\": \"MINIMAL\" | \"LOW\" | \"MODERATE\" | \"HIGH\" | \"VERY_HIGH\" | null,\n    \"firm_type\": \"string or null\",\n    \"audience\": \"Retail\" | \"Institutional\" | \"Internal\" | null,\n    \"channel\": \"string or null\",\n    \"word_count\": number | null,\n    \"analyzers_run\": [\"string\"]\n  },\n  \"issues\": {\n    \"high\": [\n      {\n        \"issue\": \"string\",\n        \"rule_violated\": \"string\",\n        \"explanation\": \"string\",\n        \"suggested_fix\": \"string\"\n      }\n    ],\n    \"medium\": [\n      {\n        \"issue\": \"string\",\n        \"rule_violated\": \"string\",\n        \"explanation\": \"string\",\n        \"suggested_fix\": \"string\"\n      }\n    ],\n    \"low\": [\n      {\n        \"issue\": \"string\",\n        \"rule_violated\": \"string\",\n        \"explanation\": \"string\",\n        \"suggested_fix\": \"string\"\n      }\n    ]\n  },\n  \"issue_counts\": {\n    \"high\": number,\n    \"medium\": number,\n    \"low\": number,\n    \"total\": number\n  },\n  \"required_changes\": [\n    {\n      \"edit\": \"string\",\n      \"rationale\": \"string\",\n      \"rule\": \"string\"\n    }\n  ],\n  \"optional_improvements\": [\n    {\n      \"suggestion\": \"string\",\n      \"rationale\": \"string\"\n    }\n  ],\n  \"required_disclosures\": \"string or null\",\n  \"substantiation_needed\": [\"string\"],\n  \"recordkeeping\": {\n    \"communication_type\": \"string or null\",\n    \"requires_principal_approval\": true | false | null,\n    \"requires_pre_use_filing\": true | false | null,\n    \"retention_period_years\": number | null,\n    \"special_requirements\": [\"string\"],\n    \"filing_category\": \"string or null\"\n  },\n  \"metrics\": {\n    \"content_complexity\": \"string or null\",\n    \"asset_complexity\": \"string or null\",\n    \"analyzers_executed\": number | null,\n    \"analyzers_total\": 8,\n    \"processing_version\": \"V4_BALANCED\"\n  },\n  \"disclaimer\": \"This AI-assisted compliance review provides guidance based on FINRA and SEC regulations. It does not constitute legal advice. Final approval should be made by a qualified compliance professional. Material changes require re-review.\"\n}\n\nPOPULATION RULES FOR SCHEMA B:\n\n- issues.high, issues.medium, issues.low: consolidate all issues across all analyzers; deduplicate where the same issue appears from multiple analyzers\n- required_changes: only HIGH and MEDIUM issues generate entries here\n- optional_improvements: LOW issues populate here, not in required_changes; empty array if no LOW issues\n- required_disclosures: copy the full copy-paste ready block from {{synthesize_results}}; null if none required\n- substantiation_needed: list only specific verifiable claims needing proof; omit general marketing language; empty array if none\n- recordkeeping: populate from {{analyze_recordkeeping}} if it executed; null for all fields if that node did not run\n- metrics.analyzers_executed: count of analyzer nodes that actually ran per {{synthesize_results.analyzers_run}}\n\nSAFE-FAIL:\n- If any upstream node is missing or empty, populate that field as null or empty array — never omit a key from the schema\n- If synthesis is missing but classification exists, return Schema B with all issue arrays empty and summary fields null\n- Never output any text outside the JSON object",
+        "__nodeVersion": "1.0.0"
+      },
+      "position": {
+        "x": 1500,
+        "y": 725
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "classify_request_type",
+      "target": "fast_fail_handler"
+    },
+    {
+      "id": "e2",
+      "source": "classify_request_type",
+      "target": "classify_content_complexity"
+    },
+    {
+      "id": "e3",
+      "source": "classify_request_type",
+      "target": "classify_asset_class"
+    },
+    {
+      "id": "e4",
+      "source": "classify_content_complexity",
+      "target": "analyze_prohibited_statements"
+    },
+    {
+      "id": "e5",
+      "source": "classify_content_complexity",
+      "target": "analyze_performance_claims"
+    },
+    {
+      "id": "e6",
+      "source": "classify_content_complexity",
+      "target": "analyze_risk_disclosures"
+    },
+    {
+      "id": "e7",
+      "source": "classify_content_complexity",
+      "target": "analyze_testimonials"
+    },
+    {
+      "id": "e8",
+      "source": "classify_content_complexity",
+      "target": "analyze_communications_standards"
+    },
+    {
+      "id": "e9",
+      "source": "classify_content_complexity",
+      "target": "analyze_recordkeeping"
+    },
+    {
+      "id": "e10",
+      "source": "classify_asset_class",
+      "target": "analyze_prohibited_statements"
+    },
+    {
+      "id": "e11",
+      "source": "classify_asset_class",
+      "target": "analyze_performance_claims"
+    },
+    {
+      "id": "e12",
+      "source": "classify_asset_class",
+      "target": "analyze_risk_disclosures"
+    },
+    {
+      "id": "e13",
+      "source": "classify_asset_class",
+      "target": "analyze_communications_standards"
+    },
+    {
+      "id": "e14",
+      "source": "classify_asset_class",
+      "target": "analyze_hedge_fund_disclosures"
+    },
+    {
+      "id": "e15",
+      "source": "classify_asset_class",
+      "target": "analyze_private_placement_disclosures"
+    },
+    {
+      "id": "e16",
+      "source": "analyze_prohibited_statements",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e17",
+      "source": "analyze_performance_claims",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e18",
+      "source": "analyze_risk_disclosures",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e19",
+      "source": "analyze_testimonials",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e20",
+      "source": "analyze_communications_standards",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e21",
+      "source": "analyze_recordkeeping",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e22",
+      "source": "analyze_hedge_fund_disclosures",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e23",
+      "source": "analyze_private_placement_disclosures",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e24",
+      "source": "classify_request_type",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e25",
+      "source": "classify_content_complexity",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e26",
+      "source": "classify_asset_class",
+      "target": "synthesize_results"
+    },
+    {
+      "id": "e27",
+      "source": "synthesize_results",
+      "target": "format_output"
+    },
+    {
+      "id": "e28",
+      "source": "fast_fail_handler",
+      "target": "format_output"
+    },
+    {
+      "id": "e29",
+      "source": "classify_request_type",
+      "target": "format_output"
+    },
+    {
+      "id": "e30",
+      "source": "classify_content_complexity",
+      "target": "format_output"
+    },
+    {
+      "id": "e31",
+      "source": "classify_asset_class",
+      "target": "format_output"
+    }
+  ]
+}
